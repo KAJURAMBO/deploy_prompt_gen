@@ -1,0 +1,12 @@
+streamlit
+pandas
+python-dotenv
+langchain
+openai
+giskard
+langchain_community
+langchain_openai
+giskard[llm]
+IPython
+pypdf
+docarray
