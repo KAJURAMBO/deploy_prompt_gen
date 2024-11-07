@@ -17,7 +17,7 @@ class DocumentProcessor:
     def __init__(self, pdf_path):
         self.pdf_path = pdf_path
         self.openai_api_key = OPENAI_API_KEY
-        self.model = "gpt-3.5-turbo"
+        self.model = "gpt-4o-mini"
         self.documents = []
         self.vectorstore = None
         self.knowledge_base = None
