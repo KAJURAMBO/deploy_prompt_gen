@@ -22,7 +22,7 @@ class DocumentProcessor:
         self.vectorstore = None
         self.knowledge_base = None
         self.testset = None
-        self.text_splitter = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=200)
+        self.text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
 
     def load_pdf(self):
         """Load PDF and split it into documents."""
