@@ -1,4 +1,6 @@
 import os
+import zipfile
+import io
 import pandas as pd
 from dotenv import load_dotenv
 import streamlit as st
@@ -8,21 +10,36 @@ from langchain_openai.embeddings import OpenAIEmbeddings
 from langchain_community.vectorstores import DocArrayInMemorySearch
 from giskard.rag import KnowledgeBase, generate_testset
 import json
+from openai import OpenAI
+import giskard
+
 
 # Load environment variables
 load_dotenv()
 OPENAI_API_KEY = os.getenv("API_KEY")
+llm_client=giskard.llm.set_llm_model("gpt-3.5-turbo-0125")
+embedding_model = OpenAIEmbeddings(
+    model="text-embedding-3-small",
+    openai_api_key=os.getenv("API_KEY"))
 
+class EmbeddingWrapper:
+    def __init__(self, embedding_model):
+        self.embedding_model = embedding_model
+
+    def embed(self, texts):
+        # Use `embed_documents` or `embed_query` depending on your use case
+        return self.embedding_model.embed_documents(texts)
+embedding_wrapper = EmbeddingWrapper(embedding_model)
 class DocumentProcessor:
     def __init__(self, pdf_path):
         self.pdf_path = pdf_path
-        self.openai_api_key = OPENAI_API_KEY
-        self.model = "text-embedding-3-small"
+        # self.openai_api_key = OPENAI_API_KEY
+        self.model = embedding_model
         self.documents = []
         self.vectorstore = None
         self.knowledge_base = None
         self.testset = None
-        self.text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        self.text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=50)
 
     def load_pdf(self):
         """Load PDF and split it into documents."""
@@ -30,36 +47,29 @@ class DocumentProcessor:
         self.documents = loader.load_and_split(self.text_splitter)
         print(f"Loaded {len(self.documents)} documents from {self.pdf_path}.")
 
-    def create_vectorstore(self):
-        """Create a vector store from the loaded documents."""
-        self.vectorstore = DocArrayInMemorySearch.from_documents(
-            self.documents, 
-            embedding=OpenAIEmbeddings()
-        )
-
-    def generate_testset(self, num_questions=15, description="A chatbot answering questions about the Legal Payment of Taxes"):
+    def generate_testset_1(self, num_questions=15, 
+                           description="You are a Legal expert creating in-depth and context-rich questions and "
+    "answers from the document content. Ensure the questions encourage analytical "
+    "thinking and provide detailed, well-explained answers, including examples where possible."):
         """Generate a test set based on the knowledge base."""
-        self.knowledge_base = KnowledgeBase(pd.DataFrame([d.page_content for d in self.documents], columns=["text"]))
+        self.knowledge_base = KnowledgeBase(pd.DataFrame([d.page_content for d in self.documents], columns=["text"]),
+                                            embedding_model=embedding_wrapper,llm_client=llm_client)
         self.testset = generate_testset(
             self.knowledge_base,
             num_questions=num_questions,
-            agent_description=description
-        )
+            agent_description=description)
         print(f"Generated testset with {num_questions} questions.")
 
-    def save_outputs(self):
-        """Save testset and output DataFrame to files, including IDs and context."""
-        
-        # Save the testset to a JSONL file first
-        self.testset.save("testset.jsonl")
-         
-        # Convert the testset to a DataFrame
+    def save_outputs(self, output_dir, base_name):
+        """Save testset and output DataFrame to files."""
+        # Save JSONL
+        jsonl_file = os.path.join(output_dir, f"{base_name}.jsonl")
+        self.testset.save(jsonl_file)
+        # Save CSV
         test_set_df = self.testset.to_pandas()
-
-        test_set_df.to_csv('out.csv', index=False)
-        print("Saved testset and output DataFrame to 'testset.jsonl' and 'out.csv'.")
-
-
+        csv_file = os.path.join(output_dir, f"{base_name}.csv")
+        test_set_df.to_csv(csv_file, index=False)
+        return jsonl_file, csv_file
 
     def display_questions(self, num_questions=3):
         """Print the specified number of questions and answers."""
@@ -71,39 +81,3 @@ class DocumentProcessor:
             print(row[1]['reference_context'])
             print("******************", end="\n\n")
 
-# Streamlit App UI and Logic
-def main():
-    st.title("Document Processor with OpenAI Test Set Generator")
-   
-    # PDF Upload
-    pdf_file = st.file_uploader("Upload a PDF file", type=["pdf"])
-    
-    # Number of Prompts
-    num_prompts = st.number_input("Enter the number of prompts to generate", min_value=1, value=3)
-    
-    if st.button("Process Document"):
-        if not pdf_file:
-            st.warning("Please upload a PDF file.")
-        else:
-            # Save the uploaded file temporarily
-            with open(pdf_file.name, "wb") as f:
-                f.write(pdf_file.getbuffer())
-            
-            # Instantiate DocumentProcessor without API key input
-            processor = DocumentProcessor(pdf_path=pdf_file.name)
-            
-            processor.load_pdf()
-            processor.create_vectorstore()
-            processor.generate_testset(num_questions=num_prompts)
-            processor.save_outputs()
-            
-            # Display Questions
-            st.write("Generated Questions:")
-            processor.display_questions(num_questions=num_prompts)  # This will print to the console; adapt as needed.
-            
-            # Download options
-            st.download_button("Download Test Set JSONL", "testset.jsonl", "testset.jsonl", mime="application/json")
-            st.download_button("Download Output CSV", "out.csv", "out.csv", mime="text/csv")
-
-if __name__ == "__main__":
-    main()
